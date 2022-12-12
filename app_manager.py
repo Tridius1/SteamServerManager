@@ -149,7 +149,7 @@ class app_manifest:
             pos += 1
         #print(command)
         print("Anonymously updating app {} : '{}'".format(appID, name))
-        steamProc = subprocess.Popen(command, stdout=subprocess.PIPE, bufsize=1)
+        steamProc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, bufsize=1)
         steamOut(steamProc)
         steamProc.wait()
 
@@ -162,16 +162,20 @@ class app_manifest:
         command = ["./steamcmd/steamcmd.sh", "+login", usrname, pswd, "+force_install_dir", "/home/steam/"+name+'/', "+app_update", str(appID), "validate", "+quit"]
         #print(command)
         print("Logging in and updating app {} : '{}'".format(appID, name))
-        steamProc = subprocess.Popen(command, stdout=subprocess.PIPE, bufsize=1)
+        steamProc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, bufsize=1)
         steamOut(steamProc)
         steamProc.wait()
     
 
+# prints output
 def steamOut(steamProc):
     usr = getuser()
-    for line in iter(steamProc.stdout.readline, b''):
-        nline = str(line)[2:-3].strip()
-        print("[{}][steamCMD]  {}".format(usr, nline))
+    while steamProc.poll() is None:
+        line = steamProc.stdout.readline()
+        #line, err = steamProc.communicate()
+        if line: 
+            line = str(line).strip()
+            print("[{}][steamCMD]  {}".format(usr, line))
 
 
 def confirm(prompt):
