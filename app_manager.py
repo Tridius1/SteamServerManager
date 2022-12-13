@@ -45,11 +45,11 @@ class app_manifest:
     def __init__(self):
 
         if not getuser() == 'steam':
-            print("Error: Must be user 'steam' to manage SteamCMD applications. You are {}".format(getuser()))
+            print("Error: Must be user 'steam' to manage SteamCMD applications. You are {}.".format(getuser()))
             exit(-1)
 
         self.data = None
-        self.filename = "app_manifest"
+        self.filename = ".SSM_manifest"
 
         self.valid = self.load()
         self.modified = False
@@ -109,6 +109,67 @@ class app_manifest:
         self.modified = True
         return
 
+
+    def editArgs(self, name):
+        cont = True
+        while cont:
+            args = self.data[name]['args']
+            #print("Arguments for {}:\n  {}".format(name, args))
+            argmenu = TerminalMenu(["Add argument", "Remove argument", "Rewrite all arguments", "Remove all arguments", "Exit"], title="Edit arguments for {}\n  {}".format(name, args))
+            select = argmenu.show()
+
+            if select == 0:
+                # add arg
+                nArgs = ask_validate("Enter new argument(s) seperated by spaces: \n  {}".format(args), "^.+$").split()
+                self.data[name]['args'].extend(nArgs)
+            elif select == 1:
+                # rem arg
+                if len(self.data[name]['args']) == 0:
+                    print("No arguments to remove")
+                else:
+                    rem_menu = TerminalMenu(args+["Exit"], title="Remove argument:")
+                    target = rem_menu.show()
+                    if not target is None and not target == len(self.data[name]['args']):
+                        # not cancel
+                        if confirm("Remove argument '{}' for server {}?".format(args[target], name)):
+                            self.data[name]['args'].remove(args[target])
+            elif select == 2:
+                # rewrite all
+                if confirm("Delete all arguments and enter new set?"):
+                    newArgs = ask_validate("Enter arguments seperated by spaces: \n  {}".format(args), "^.+$").split()
+                    self.data[name]['args'] = newArgs
+            elif select == 3:
+                if confirm("Delete all {} arguments for {}?\n  {}".format(len(args), name, args)):
+                    self.data[name]['args'] = []
+
+            else: cont = False
+            self.modified = True
+
+
+    def editApp(self, name):
+        items = ["{} : {}".format(k, v) for k, v in self.data[name].items()]
+        items[1].replace("anon", "login")
+        #items.insert(0, "name : {}".format(name))
+        items.append("Exit")
+        edit_menu = TerminalMenu(items, title="Edit properties for {}".format(name))
+        prop = edit_menu.show()
+
+        if prop == 0:
+            #edit id
+            print("{}:\n  id = {}".format(name, self.data[name]['id']))
+            newid = ask_validate("Enter new app id: " , "^[0-9]{2,12}$")
+            self.data[name]['id'] = newid
+            print("{} app id set to {}".format(name, newid))
+        elif prop == 1:
+            #edit anon
+            anon_menu = TerminalMenu(['No', 'Yes'], title="Is user verification required?")
+            anon = anon_menu.show()
+            self.data[name]['anon'] = bool(anon)
+            print("{} app anonymity set to {}".format(name, bool(anon)))
+        elif prop == 2:
+            self.editArgs(name)
+        else: return
+
     def removeApp(self, name):
         del self.data[name]
         print("Server '{}' removed".format(name))
@@ -122,7 +183,7 @@ class app_manifest:
             print("    No existing servers found  \n")
             return
 
-        row_template = "{:>12} " * 4
+        row_template = "{:<16} {:<12} {:<8} {:<24}"
         print("\nServers:\n")
         print(row_template.format("Name", "App ID", "Login", "Arguments"))
         for name, row in self.data.items():
@@ -180,8 +241,18 @@ def steamOut(steamProc):
 
 def confirm(prompt):
     conf_menu = TerminalMenu(["Confirm", "Cancel"], title=prompt)
-    val =  bool(conf_menu.show())
-    return not val
+    val =  conf_menu.show()
+    if val is None:
+        return False
+    return not bool(val)
+
+def pickServer(Manifest):
+    servers = list(Manifest.data.keys())
+    server_menu = TerminalMenu(servers, title="Select server")
+    server = server_menu.show()
+    if not server is None:
+        server = servers[server]
+    return server
 
 
 if __name__ == "__main__":
@@ -190,9 +261,13 @@ if __name__ == "__main__":
 
     quit = False
 
+    ### Welcome message
+    welcome = "\nWelcome to SteamServerManager, a wrapper for SteamCMD. \n  -- press 'q' or 'ESC' in any menu to go back --"
+    print(welcome)
+    
     if not Manifest.valid:
         # No manifest menu
-        badLoad_menu = TerminalMenu(["Add new server", "Exit"])
+        badLoad_menu = TerminalMenu(["Add new server", "Exit"], title="No manifest found")
         selection = badLoad_menu.show()
         if selection == 0:
             Manifest.createApp()
@@ -206,32 +281,35 @@ if __name__ == "__main__":
     while not quit:
         Manifest.printData()
 
-        main_menu = TerminalMenu(["Update a server", "New server", "Remove server", "Exit"], title="Main Menu")
+        main_menu = TerminalMenu(["Update a server", "Edit server", "New server", "Remove server", "Exit"], title="Main Menu")
         selection = main_menu.show()
         if selection == 0:
             # Pick server
-            servers = list(Manifest.data.keys())
-            server_menu = TerminalMenu(servers, title="Select server")
-            server = server_menu.show()
-            server = servers[server]
-            if confirm("Update server " + server + "?"):
-                Manifest.update(server)
-        
+            server = pickServer(Manifest)
+            if not server is None:
+                if confirm("Update server " + server + "?"):
+                    Manifest.update(server)
         elif selection == 1:
-            Manifest.createApp()
+            #edit server
+            server = pickServer(Manifest)
+            if not server is None:
+                Manifest.editApp(server)
         elif selection == 2:
+            Manifest.createApp()
+        elif selection == 3:
             #remove server
-            servers = list(Manifest.data.keys())
+            servers = list(Manifest.data.keys()) + ["Cancel"]
             server_menu = TerminalMenu(servers, title="Select server to remove")
             server = server_menu.show()
-            server = servers[server]
+            if not server is None and not server == len(servers) - 1:
+                server = servers[server]
 
-            if confirm("Remove server " + server + "?"):
-                Manifest.removeApp(server)
-                if confirm("Delete files on disk?"):
-                    # Delete entire directory and contents
-                    shutil.rmtree("/home/steam/{}/".format(server))
-                    print("Files deleted")
+                if confirm("Remove server " + server + "?"):
+                    Manifest.removeApp(server)
+                    if confirm("Delete files on disk?"):
+                        # Delete entire directory and contents
+                        shutil.rmtree("/home/steam/{}/".format(server))
+                        print("Files deleted")
 
         else:
             # exit
