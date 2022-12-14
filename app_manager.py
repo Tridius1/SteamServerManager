@@ -1,5 +1,7 @@
 import os
 from sys import exit
+import json
+import requests
 import shutil
 import subprocess
 import pickle
@@ -41,6 +43,34 @@ def choose_validate(prompt, true_regex, false_regex):
 
     return ret
 
+# Getting app name from id
+class app_name:
+    def __init__(self):
+        self.url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+        self.list = None
+        self.ready = False # Has the list been fetched this session?
+
+    # make the request
+    def fetch(self):
+        r = requests.get(self.url)
+        self.list = json.loads(r.text)['applist']['apps']
+        self.ready = True
+    
+    # call to get name from id
+    def __call__(self, app_id):
+        # handle fetching list
+        if not self.ready:
+            self.fetch()
+        # iterate and find app name
+        app_id = int(app_id)
+        for app in self.list:
+            if app['appid'] == app_id:
+                return app['name']
+        return None
+# Init an instance to be used
+get_name = app_name()
+
+
 class app_manifest:
     def __init__(self):
 
@@ -53,7 +83,7 @@ class app_manifest:
 
         self.valid = self.load()
         self.modified = False
-
+        
     # opens the manifest and unpickles it
     # returns sucsess
     def load(self):
@@ -76,7 +106,7 @@ class app_manifest:
         self.modified = False
         return True
 
-    def newApp(self, name, app_id, anon, args):
+    def newApp(self, name, app_id, app_name, anon, args):
         if os.path.exists('/home/steam/' + name + '/'):
             if not confirm("Existing directory '"+name+"' found. Continue anyway?"):
                 #cancel
@@ -85,16 +115,36 @@ class app_manifest:
             os.mkdir('/home/steam/' + name + '/')
         if args is None:
             args = []
-        self.data[name] = {"id":app_id, "anon":anon, "args":args}
+        self.data[name] = {"id":app_id, "name":app_name, "anon":anon, "args":args}
 
         self.modified = True
         return
+
+    def newID(self):
+        # get input for id and confirm app
+        while True:
+            app_id = int( ask_validate("Enter app id: " , "^[0-9]{2,12}$") )
+            app_name = get_name(app_id)
+            if app_name == None:
+                if not bool( TerminalMenu(["Abort", "Continue"], title="No application could be found with id {}.".format(app_id)).show() ):
+                    # aborted
+                    continue
+            else:
+                # app found
+                if not confirm("Application {} '{}'".format(app_id, app_name)):
+                    continue
+            # Success
+            break
+        # Done
+        return app_id, app_name
+
+
 
     def createApp(self):
         print("Creating a new sever\n")
         
         name = ask_validate("Name server: ", "^[^*&%\s]+$")
-        app_id = ask_validate("Enter app id: " , "^[0-9]{2,12}$")
+        app_id, app_name = self.newID()
         anon_menu = TerminalMenu(['No', 'Yes'], title="Is user verification required?")
         anon = anon_menu.show()
 
@@ -105,7 +155,7 @@ class app_manifest:
             # enter args
         
 
-        self.newApp(str(name), int(app_id), bool(anon), args)
+        self.newApp(str(name), int(app_id), str(app_name), bool(anon), args)
         self.modified = True
         return
 
@@ -157,8 +207,9 @@ class app_manifest:
         if prop == 0:
             #edit id
             print("{}:\n  id = {}".format(name, self.data[name]['id']))
-            newid = ask_validate("Enter new app id: " , "^[0-9]{2,12}$")
+            newid, app_name = self.newID()
             self.data[name]['id'] = newid
+            self.data[name]['name'] = app_name
             print("{} app id set to {}".format(name, newid))
         elif prop == 1:
             #edit anon
@@ -183,9 +234,9 @@ class app_manifest:
             print("    No existing servers found  \n")
             return
 
-        row_template = "{:<16} {:<12} {:<8} {:<24}"
+        row_template = "{:<16} {:<12} {:<8} {:<24} {:<32}"
         print("\nServers:\n")
-        print(row_template.format("Name", "App ID", "Login", "Arguments"))
+        print(row_template.format("Server Name", "App ID", "Login", "Arguments", "Application Name"))
         for name, row in self.data.items():
             print(row_template.format(name, *map(str, row.values())))
         print('\n')
@@ -221,6 +272,11 @@ class app_manifest:
         pswd = getpass("Enter Steam password: ")
 
         command = ["./steamcmd/steamcmd.sh", "+login", usrname, pswd, "+force_install_dir", "/home/steam/"+name+'/', "+app_update", str(appID), "validate", "+quit"]
+        #Apply user defined arguments
+        pos = 7
+        for arg in self.data[name]["args"]:
+            command.insert(pos, arg)
+            pos += 1
         #print(command)
         print("Logging in and updating app {} : '{}'".format(appID, name))
         steamProc = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, bufsize=1)
